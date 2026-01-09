@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'second_page.dart';
+import 'package:ramble/screens/thoughts_page.dart';
+import 'thoughts_page.dart';
 
 class HomePage extends StatefulWidget {
   @override
@@ -23,14 +24,23 @@ class _HomePageState extends State<HomePage> {
     },
   ];
 
-  void _syncAudio() {
-    // This will eventually trigger Bluetooth sync
+  void _syncAudio() async {
+    // Show syncing message
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Syncing audio files...'),
         duration: Duration(seconds: 2),
       ),
     );
+    
+    // Navigate to thoughts page which will handle the transcription
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => ThoughtsPage(autoTranscribe: true)),
+    );
+    
+    // Refresh recent thoughts when returning
+    setState(() {});
   }
 
   @override
@@ -85,7 +95,7 @@ class _HomePageState extends State<HomePage> {
                 Navigator.pop(context);
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (context) => SecondPage()),
+                  MaterialPageRoute(builder: (context) => ThoughtsPage()),
                 );
               },
             ),
@@ -256,7 +266,7 @@ class _HomePageState extends State<HomePage> {
                               onPressed: () {
                                 Navigator.push(
                                   context,
-                                  MaterialPageRoute(builder: (context) => SecondPage()),
+                                  MaterialPageRoute(builder: (context) => ThoughtsPage()),
                                 );
                               },
                               child: Text('View All →'),
@@ -302,7 +312,7 @@ class _HomePageState extends State<HomePage> {
                             onTap: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (context) => SecondPage()),
+                                MaterialPageRoute(builder: (context) => ThoughtsPage()),
                               );
                             },
                           ),
