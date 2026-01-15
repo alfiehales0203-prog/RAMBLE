@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:audioplayers/audioplayers.dart';
+import 'package:hive/hive.dart';
+import '../models/audio_note.dart';
+import '../models/user_category.dart';
 import '../config.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -19,12 +21,11 @@ class ThoughtsPage extends StatefulWidget {
 class _ThoughtsPageState extends State<ThoughtsPage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
-  // Audio and file data
-  List<String> savedFiles = [];
-  Map<String, String> transcriptions = {};
+  late Box<AudioNote> audioBox;
+  late Box<UserCategory> categoryBox;
+  List<AudioNote> notes = [];
+  List<UserCategory> categories = [];
   Map<String, bool> transcribing = {};
-  Map<String, String> categories = {};
-  Map<String, DateTime> timestamps = {}; // Store file timestamps
   String statusMessage = 'Loading thoughts...';
   
   final audioPlayer = AudioPlayer();
@@ -34,7 +35,10 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
   @override
   void initState() {
     super.initState();
-    loadSavedFiles();
+    audioBox = Hive.box<AudioNote>('audioNotes');
+    categoryBox = Hive.box<UserCategory>('categories');
+    loadCategories();
+    loadNotes();
     
     audioPlayer.onPlayerComplete.listen((event) {
       setState(() {
@@ -50,81 +54,107 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     super.dispose();
   }
 
-  // LOAD ALL SAVED FILES
-  Future<void> loadSavedFiles() async {
+  void loadCategories() {
+    setState(() {
+      categories = categoryBox.values.toList();
+    });
+  }
+
+  Future<void> loadNotes() async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final dir = Directory(directory.path);
-      final files = dir.listSync();
-      
       setState(() {
-        savedFiles = files
-            .where((item) => item.path.contains('audio_'))
-            .map((item) => item.path.split(Platform.pathSeparator).last)
-            .toList();
+        notes = audioBox.values.toList();
+        notes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
         
-        // Extract timestamps from filenames and store them
-        for (var filename in savedFiles) {
-          final timestampStr = filename.replaceAll('audio_', '').replaceAll('.wav', '').replaceAll('.txt', '');
-          try {
-            final timestamp = int.parse(timestampStr);
-            timestamps[filename] = DateTime.fromMillisecondsSinceEpoch(timestamp);
-          } catch (e) {
-            timestamps[filename] = DateTime.now();
-          }
-        }
-        
-        // Sort by timestamp (newest first)
-        savedFiles.sort((a, b) {
-          final timeA = timestamps[a] ?? DateTime.now();
-          final timeB = timestamps[b] ?? DateTime.now();
-          return timeB.compareTo(timeA);
-        });
-        
-        if (savedFiles.isEmpty) {
+        if (notes.isEmpty) {
           statusMessage = 'No thoughts yet. Sync your device to get started!';
         } else {
-          statusMessage = '${savedFiles.length} thought(s)';
+          statusMessage = '${notes.length} thought(s)';
         }
       });
       
-      // Auto-transcribe if requested (from sync button)
-      if (widget.autoTranscribe && savedFiles.isNotEmpty) {
+      await syncFilesWithDatabase();
+      
+      if (widget.autoTranscribe) {
         await transcribeAllNew();
       }
       
     } catch (e) {
       setState(() {
-        statusMessage = 'Error loading files: $e';
+        statusMessage = 'Error loading thoughts: $e';
       });
     }
   }
 
-  // AUTO-TRANSCRIBE NEW FILES
+  Future<void> syncFilesWithDatabase() async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final dir = Directory(directory.path);
+      final files = dir.listSync();
+      
+      final audioFiles = files
+          .where((item) => item.path.contains('audio_'))
+          .map((item) => item.path.split(Platform.pathSeparator).last)
+          .toList();
+      
+      for (var filename in audioFiles) {
+        final exists = notes.any((note) => note.filename == filename);
+        
+        if (!exists) {
+          final timestampStr = filename.replaceAll('audio_', '').replaceAll('.wav', '').replaceAll('.txt', '');
+          DateTime timestamp;
+          try {
+            final ms = int.parse(timestampStr);
+            timestamp = DateTime.fromMillisecondsSinceEpoch(ms);
+          } catch (e) {
+            timestamp = DateTime.now();
+          }
+          
+          final note = AudioNote(
+            filename: filename,
+            timestamp: timestamp,
+            audioFilePath: '${directory.path}/$filename',
+          );
+          
+          await audioBox.add(note);
+        }
+      }
+      
+      setState(() {
+        notes = audioBox.values.toList();
+        notes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        statusMessage = '${notes.length} thought(s)';
+      });
+      
+    } catch (e) {
+      print('Sync error: $e');
+    }
+  }
+
   Future<void> transcribeAllNew() async {
-    for (var filename in savedFiles) {
-      if (!transcriptions.containsKey(filename) && !transcribing.containsKey(filename)) {
-        await transcribeAudio(filename);
+    for (var note in notes) {
+      if (!note.isTranscribed && !transcribing.containsKey(note.filename)) {
+        await transcribeAudio(note);
       }
     }
   }
 
-  // TRANSCRIBE AUDIO FILE
-  Future<void> transcribeAudio(String filename) async {
+  Future<void> transcribeAudio(AudioNote note) async {
     final apiKey = Config.assemblyAiApiKey;
     
     try {
       setState(() {
-        transcribing[filename] = true;
-        statusMessage = 'Transcribing $filename...';
+        transcribing[note.filename] = true;
+        statusMessage = 'Transcribing ${note.filename}...';
       });
       
-      final directory = await getApplicationDocumentsDirectory();
-      final filePath = '${directory.path}/$filename';
-      final audioFile = File(filePath);
+      final audioFile = File(note.audioFilePath ?? '');
+      if (!await audioFile.exists()) {
+        throw Exception('Audio file not found');
+      }
+      
       final audioBytes = await audioFile.readAsBytes();
       
-      // Step 1: Upload the audio file
       final uploadResponse = await http.post(
         Uri.parse('https://api.assemblyai.com/v2/upload'),
         headers: {
@@ -135,41 +165,35 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
       );
       
       if (uploadResponse.statusCode != 200) {
-        throw Exception('Upload failed: ${uploadResponse.body}');
+        throw Exception('Upload failed');
       }
       
       final uploadData = jsonDecode(uploadResponse.body);
       final uploadUrl = uploadData['upload_url'];
       
-      // Step 2: Request transcription
       final transcriptResponse = await http.post(
         Uri.parse('https://api.assemblyai.com/v2/transcript'),
         headers: {
           'authorization': apiKey,
           'content-type': 'application/json',
         },
-        body: jsonEncode({
-          'audio_url': uploadUrl,
-        }),
+        body: jsonEncode({'audio_url': uploadUrl}),
       );
       
       if (transcriptResponse.statusCode != 200) {
-        throw Exception('Transcription request failed: ${transcriptResponse.body}');
+        throw Exception('Transcription request failed');
       }
       
       final transcriptData = jsonDecode(transcriptResponse.body);
       final transcriptId = transcriptData['id'];
       
-      // Step 3: Poll for completion
       String? transcription;
       while (true) {
         await Future.delayed(Duration(seconds: 2));
         
         final pollResponse = await http.get(
           Uri.parse('https://api.assemblyai.com/v2/transcript/$transcriptId'),
-          headers: {
-            'authorization': apiKey,
-          },
+          headers: {'authorization': apiKey},
         );
         
         final pollData = jsonDecode(pollResponse.body);
@@ -179,44 +203,48 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
           transcription = pollData['text'];
           break;
         } else if (status == 'error') {
-          throw Exception('Transcription failed: ${pollData['error']}');
+          throw Exception('Transcription failed');
         }
       }
       
+      note.transcription = transcription ?? 'No transcription available';
+      note.isTranscribed = true;
+      await note.save();
+      
       setState(() {
-        transcriptions[filename] = transcription ?? 'No transcription available';
-        transcribing[filename] = false;
-        statusMessage = '${savedFiles.length} thought(s)';
+        transcribing[note.filename] = false;
+        statusMessage = '${notes.length} thought(s)';
+        notes = audioBox.values.toList();
+        notes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       });
       
     } catch (e) {
+      note.transcription = 'Error: ${e.toString()}';
+      await note.save();
+      
       setState(() {
-        transcriptions[filename] = 'Error: ${e.toString()}';
-        transcribing[filename] = false;
+        transcribing[note.filename] = false;
         statusMessage = 'Transcription error';
       });
     }
   }
 
-  // GET PREVIEW (first 50 chars of transcription)
-  String getPreview(String filename) {
-    if (transcribing[filename] == true) {
+  String getPreview(AudioNote note) {
+    if (transcribing[note.filename] == true) {
       return 'Transcribing...';
     }
     
-    final transcription = transcriptions[filename];
-    if (transcription == null || transcription.isEmpty) {
-      return filename;
+    if (note.transcription == null || note.transcription!.isEmpty) {
+      return note.filename;
     }
     
-    if (transcription.length <= 50) {
-      return transcription;
+    if (note.transcription!.length <= 50) {
+      return note.transcription!;
     }
     
-    return '${transcription.substring(0, 50)}...';
+    return '${note.transcription!.substring(0, 50)}...';
   }
 
-  // FORMAT DATE/TIME
   String formatDateTime(DateTime dateTime) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
@@ -236,27 +264,28 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
 
   String formatFullDateTime(DateTime dateTime) {
     final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    final hour = dateTime.hour > 12 ? dateTime.hour - 12 : dateTime.hour;
+    final hour = dateTime.hour > 12 ? dateTime.hour - 12 : (dateTime.hour == 0 ? 12 : dateTime.hour);
     final ampm = dateTime.hour >= 12 ? 'PM' : 'AM';
     
     return '${months[dateTime.month - 1]} ${dateTime.day}, ${dateTime.year} at ${hour}:${dateTime.minute.toString().padLeft(2, '0')} $ampm';
   }
 
-  // ASSIGN CATEGORY
-  void assignCategory(String filename, String category) {
+  Future<void> assignCategory(AudioNote note, String category) async {
+    note.category = category;
+    await note.save();
+    
     setState(() {
-      categories[filename] = category;
       statusMessage = 'Assigned to $category';
+      notes = audioBox.values.toList();
+      notes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     });
   }
 
-  // PLAY AUDIO
-  Future<void> playAudio(String filename) async {
+  Future<void> playAudio(AudioNote note) async {
     try {
-      final directory = await getApplicationDocumentsDirectory();
-      final filePath = '${directory.path}/$filename';
+      if (note.audioFilePath == null) return;
       
-      if (currentlyPlaying == filename && isPlaying) {
+      if (currentlyPlaying == note.filename && isPlaying) {
         await audioPlayer.pause();
         setState(() {
           isPlaying = false;
@@ -268,10 +297,10 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
         await audioPlayer.stop();
       }
       
-      await audioPlayer.play(DeviceFileSource(filePath));
+      await audioPlayer.play(DeviceFileSource(note.audioFilePath!));
       
       setState(() {
-        currentlyPlaying = filename;
+        currentlyPlaying = note.filename;
         isPlaying = true;
       });
       
@@ -282,10 +311,9 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     }
   }
 
-  // DELETE FILE
-  Future<void> deleteFile(String filename) async {
+  Future<void> deleteNote(AudioNote note) async {
     try {
-      if (currentlyPlaying == filename) {
+      if (currentlyPlaying == note.filename) {
         await audioPlayer.stop();
         setState(() {
           isPlaying = false;
@@ -293,21 +321,20 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
         });
       }
       
-      final directory = await getApplicationDocumentsDirectory();
-      final filePath = '${directory.path}/$filename';
-      final file = File(filePath);
-      await file.delete();
+      if (note.audioFilePath != null) {
+        final file = File(note.audioFilePath!);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
       
-      transcriptions.remove(filename);
-      transcribing.remove(filename);
-      categories.remove(filename);
-      timestamps.remove(filename);
+      await note.delete();
       
       setState(() {
-        statusMessage = 'Deleted thought';
+        notes = audioBox.values.toList();
+        notes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        statusMessage = '${notes.length} thought(s)';
       });
-      
-      loadSavedFiles();
       
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -316,11 +343,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     }
   }
 
-  // SHOW FULL TRANSCRIPTION
-  void showFullTranscription(String filename) {
-    final transcription = transcriptions[filename];
-    final timestamp = timestamps[filename];
-    
+  void showFullTranscription(AudioNote note) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -330,27 +353,26 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (timestamp != null)
-                Padding(
-                  padding: EdgeInsets.only(bottom: 12),
-                  child: Row(
-                    children: [
-                      Icon(Icons.access_time, size: 16, color: Colors.grey),
-                      SizedBox(width: 8),
-                      Text(
-                        formatFullDateTime(timestamp),
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey.shade700,
-                        ),
+              Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Row(
+                  children: [
+                    Icon(Icons.access_time, size: 16, color: Colors.grey),
+                    SizedBox(width: 8),
+                    Text(
+                      formatFullDateTime(note.timestamp),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade700,
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
+              ),
               Divider(),
               SizedBox(height: 8),
               Text(
-                transcription ?? 'No transcription available',
+                note.transcription ?? 'No transcription available',
                 style: TextStyle(fontSize: 16),
               ),
             ],
@@ -366,10 +388,260 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     );
   }
 
-  // SHOW THOUGHT OPTIONS MENU
-  void showThoughtOptions(String filename) {
-    final timestamp = timestamps[filename];
+  IconData _getIconData(String iconName) {
+    switch (iconName) {
+      case 'shopping_cart':
+        return Icons.shopping_cart;
+      case 'check_box':
+        return Icons.check_box;
+      case 'lightbulb':
+        return Icons.lightbulb;
+      case 'category':
+        return Icons.category;
+      case 'work':
+        return Icons.work;
+      case 'home':
+        return Icons.home;
+      case 'star':
+        return Icons.star;
+      case 'favorite':
+        return Icons.favorite;
+      case 'book':
+        return Icons.book;
+      case 'music_note':
+        return Icons.music_note;
+      case 'restaurant':
+        return Icons.restaurant;
+      case 'local_hospital':
+        return Icons.local_hospital;
+      default:
+        return Icons.category;
+    }
+  }
+
+  Icon _getCategoryIconFromCategory(UserCategory category) {
+    return Icon(_getIconData(category.iconName), color: Color(category.colorValue));
+  }
+
+  Icon _getCategoryIcon(String categoryName) {
+    final category = categories.firstWhere(
+      (c) => c.name == categoryName,
+      orElse: () => categories.isNotEmpty ? categories.first : UserCategory(name: 'Default', iconName: 'category', colorValue: 0xFF2196F3),
+    );
+    return _getCategoryIconFromCategory(category);
+  }
+
+  void showAddCategoryDialog() {
+    final nameController = TextEditingController();
+    String selectedIcon = 'category';
+    int selectedColor = 0xFF2196F3;
     
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Add Category'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    labelText: 'Category Name',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                
+                SizedBox(height: 16),
+                
+                Text('Select Icon:', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 8),
+                
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    'shopping_cart', 'check_box', 'lightbulb', 'category',
+                    'work', 'home', 'star', 'favorite', 'book', 'music_note',
+                    'restaurant', 'local_hospital'
+                  ].map((iconName) => GestureDetector(
+                    onTap: () {
+                      setDialogState(() {
+                        selectedIcon = iconName;
+                      });
+                    },
+                    child: Container(
+                      padding: EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: selectedIcon == iconName ? Colors.blue : Colors.grey.shade300,
+                          width: selectedIcon == iconName ? 2 : 1,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(_getIconData(iconName), color: Color(selectedColor)),
+                    ),
+                  )).toList(),
+                ),
+                
+                SizedBox(height: 16),
+                
+                Text('Select Color:', style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 8),
+                
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    0xFFFF9800,
+                    0xFF2196F3,
+                    0xFFFBC02D,
+                    0xFF9C27B0,
+                    0xFF4CAF50,
+                    0xFFF44336,
+                    0xFF00BCD4,
+                    0xFFFF5722,
+                  ].map((colorValue) => GestureDetector(
+                    onTap: () {
+                      setDialogState(() {
+                        selectedColor = colorValue;
+                      });
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: Color(colorValue),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: selectedColor == colorValue ? Colors.black : Colors.transparent,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  )).toList(),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                if (nameController.text.isNotEmpty) {
+                  final newCategory = UserCategory(
+                    name: nameController.text,
+                    iconName: selectedIcon,
+                    colorValue: selectedColor,
+                  );
+                  
+                  await categoryBox.add(newCategory);
+                  loadCategories();
+                  
+                  Navigator.pop(context);
+                  
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Category "${nameController.text}" added!')),
+                  );
+                }
+              },
+              child: Text('Add'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void showManageCategoriesDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Manage Categories'),
+        content: Container(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: categories.length,
+            itemBuilder: (context, index) {
+              final category = categories[index];
+              final usageCount = notes.where((note) => note.category == category.name).length;
+              
+              return ListTile(
+                leading: _getCategoryIconFromCategory(category),
+                title: Text(category.name),
+                subtitle: Text('$usageCount thought(s)'),
+                trailing: IconButton(
+                  icon: Icon(Icons.delete, color: Colors.red),
+                  onPressed: () {
+                    showDeleteCategoryConfirmation(category, usageCount);
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void showDeleteCategoryConfirmation(UserCategory category, int usageCount) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete "${category.name}"?'),
+        content: Text(
+          usageCount > 0
+              ? 'This category is used by $usageCount thought(s). Those thoughts will become uncategorized.'
+              : 'Are you sure you want to delete this category?'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              for (var note in notes) {
+                if (note.category == category.name) {
+                  note.category = null;
+                  await note.save();
+                }
+              }
+              
+              await category.delete();
+              loadCategories();
+              
+              Navigator.pop(context);
+              Navigator.pop(context);
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Category deleted')),
+              );
+              
+              setState(() {
+                notes = audioBox.values.toList();
+                notes.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+              });
+            },
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void showThoughtOptions(AudioNote note) {
     showModalBottomSheet(
       context: context,
       shape: RoundedRectangleBorder(
@@ -390,61 +662,56 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
               ),
             ),
             
-            // Preview and timestamp
             Column(
               children: [
                 Text(
-                  getPreview(filename),
+                  getPreview(note),
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
-                if (timestamp != null)
-                  Padding(
-                    padding: EdgeInsets.only(top: 8),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.access_time, size: 14, color: Colors.grey),
-                        SizedBox(width: 4),
-                        Text(
-                          formatFullDateTime(timestamp),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey.shade600,
-                          ),
+                Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.access_time, size: 14, color: Colors.grey),
+                      SizedBox(width: 4),
+                      Text(
+                        formatFullDateTime(note.timestamp),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey.shade600,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                ),
               ],
             ),
             
             SizedBox(height: 20),
             
-            // View Full Transcription
-            if (transcriptions[filename] != null && transcriptions[filename]!.length > 50)
+            if (note.transcription != null && note.transcription!.length > 50)
               ListTile(
                 leading: Icon(Icons.text_snippet, color: Colors.blue),
                 title: Text('View Full Transcription'),
                 onTap: () {
                   Navigator.pop(context);
-                  showFullTranscription(filename);
+                  showFullTranscription(note);
                 },
               ),
             
-            // Play Audio
             ListTile(
               leading: Icon(Icons.play_arrow, color: Colors.green),
               title: Text('Play Audio'),
               onTap: () {
                 Navigator.pop(context);
-                playAudio(filename);
+                playAudio(note);
               },
             ),
             
             Divider(),
             
-            // Category options
             Text(
               'Assign to Category',
               style: TextStyle(
@@ -456,63 +723,26 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
             
             SizedBox(height: 8),
             
-            ListTile(
-              leading: Icon(Icons.shopping_cart, color: Colors.orange),
-              title: Text('Shopping List'),
-              trailing: categories[filename] == 'Shopping List' 
+            ...categories.map((category) => ListTile(
+              leading: _getCategoryIconFromCategory(category),
+              title: Text(category.name),
+              trailing: note.category == category.name 
                   ? Icon(Icons.check, color: Colors.green) 
                   : null,
               onTap: () {
                 Navigator.pop(context);
-                assignCategory(filename, 'Shopping List');
+                assignCategory(note, category.name);
               },
-            ),
-            
-            ListTile(
-              leading: Icon(Icons.check_box, color: Colors.blue),
-              title: Text('To Do List'),
-              trailing: categories[filename] == 'To Do List' 
-                  ? Icon(Icons.check, color: Colors.green) 
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                assignCategory(filename, 'To Do List');
-              },
-            ),
-            
-            ListTile(
-              leading: Icon(Icons.lightbulb, color: Colors.yellow.shade700),
-              title: Text('Ideas'),
-              trailing: categories[filename] == 'Ideas' 
-                  ? Icon(Icons.check, color: Colors.green) 
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                assignCategory(filename, 'Ideas');
-              },
-            ),
-            
-            ListTile(
-              leading: Icon(Icons.category, color: Colors.purple),
-              title: Text('Miscellaneous'),
-              trailing: categories[filename] == 'Miscellaneous' 
-                  ? Icon(Icons.check, color: Colors.green) 
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                assignCategory(filename, 'Miscellaneous');
-              },
-            ),
+            )).toList(),
             
             Divider(),
             
-            // Delete
             ListTile(
               leading: Icon(Icons.delete, color: Colors.red),
               title: Text('Delete', style: TextStyle(color: Colors.red)),
               onTap: () {
                 Navigator.pop(context);
-                showDeleteConfirmation(filename);
+                showDeleteConfirmation(note);
               },
             ),
           ],
@@ -521,8 +751,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     );
   }
 
-  // SHOW DELETE CONFIRMATION
-  void showDeleteConfirmation(String filename) {
+  void showDeleteConfirmation(AudioNote note) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -536,7 +765,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              deleteFile(filename);
+              deleteNote(note);
             },
             child: Text('Delete', style: TextStyle(color: Colors.red)),
           ),
@@ -545,25 +774,22 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     );
   }
 
-  // SHOW CATEGORY FILTER
-  void showCategoryFilter(String category) {
-    final filteredFiles = savedFiles
-        .where((file) => categories[file] == category)
-        .toList();
+  void showCategoryFilter(String categoryName) {
+    final filteredNotes = notes.where((note) => note.category == categoryName).toList();
     
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            _getCategoryIcon(category),
+            _getCategoryIcon(categoryName),
             SizedBox(width: 12),
-            Text(category),
+            Text(categoryName),
           ],
         ),
         content: Container(
           width: double.maxFinite,
-          child: filteredFiles.isEmpty
+          child: filteredNotes.isEmpty
               ? Padding(
                   padding: EdgeInsets.all(20),
                   child: Text(
@@ -574,20 +800,17 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
                 )
               : ListView.builder(
                   shrinkWrap: true,
-                  itemCount: filteredFiles.length,
+                  itemCount: filteredNotes.length,
                   itemBuilder: (context, index) {
-                    final file = filteredFiles[index];
-                    final timestamp = timestamps[file];
+                    final note = filteredNotes[index];
                     
                     return ListTile(
                       leading: Icon(Icons.audiotrack),
-                      title: Text(getPreview(file)),
-                      subtitle: timestamp != null
-                          ? Text(formatDateTime(timestamp))
-                          : null,
+                      title: Text(getPreview(note)),
+                      subtitle: Text(formatDateTime(note.timestamp)),
                       onTap: () {
                         Navigator.pop(context);
-                        showThoughtOptions(file);
+                        showThoughtOptions(note);
                       },
                     );
                   },
@@ -603,22 +826,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     );
   }
 
-  Icon _getCategoryIcon(String category) {
-    switch (category) {
-      case 'Shopping List':
-        return Icon(Icons.shopping_cart, color: Colors.orange);
-      case 'To Do List':
-        return Icon(Icons.check_box, color: Colors.blue);
-      case 'Ideas':
-        return Icon(Icons.lightbulb, color: Colors.yellow.shade700);
-      case 'Miscellaneous':
-        return Icon(Icons.category, color: Colors.purple);
-      default:
-        return Icon(Icons.category);
-    }
-  }
-
-  @override
+ @override
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
@@ -627,7 +835,6 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
       body: SafeArea(
         child: Column(
           children: [
-            // TOP BANNER
             Container(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -664,51 +871,45 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
               ),
             ),
             
-            // CATEGORY FILTER BUTTONS
             Container(
               padding: EdgeInsets.all(16),
-              child: Row(
+              child: Column(
                 children: [
-                  Expanded(
-                    child: _CategoryButton(
-                      icon: Icons.shopping_cart,
-                      label: 'Shopping',
-                      color: Colors.orange,
-                      onPressed: () => showCategoryFilter('Shopping List'),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        ...categories.map((category) => Padding(
+                          padding: EdgeInsets.only(right: 8),
+                          child: _CategoryButton(
+                            icon: _getIconData(category.iconName),
+                            label: category.name,
+                            color: Color(category.colorValue),
+                            onPressed: () => showCategoryFilter(category.name),
+                          ),
+                        )).toList(),
+                        
+                        Padding(
+                          padding: EdgeInsets.only(left: 4),
+                          child: IconButton(
+                            icon: Icon(Icons.add_circle_outline, color: Colors.blue, size: 32),
+                            onPressed: showAddCategoryDialog,
+                            tooltip: 'Add Category',
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryButton(
-                      icon: Icons.check_box,
-                      label: 'To Do',
-                      color: Colors.blue,
-                      onPressed: () => showCategoryFilter('To Do List'),
-                    ),
-                  ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryButton(
-                      icon: Icons.lightbulb,
-                      label: 'Ideas',
-                      color: Colors.yellow.shade700,
-                      onPressed: () => showCategoryFilter('Ideas'),
-                    ),
-                  ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: _CategoryButton(
-                      icon: Icons.category,
-                      label: 'Misc',
-                      color: Colors.purple,
-                      onPressed: () => showCategoryFilter('Miscellaneous'),
-                    ),
+                  
+                  TextButton.icon(
+                    onPressed: showManageCategoriesDialog,
+                    icon: Icon(Icons.settings, size: 16),
+                    label: Text('Manage Categories', style: TextStyle(fontSize: 12)),
                   ),
                 ],
               ),
             ),
             
-            // Status message
             Padding(
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: Container(
@@ -734,9 +935,8 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
             
             SizedBox(height: 16),
             
-            // ALL THOUGHTS LIST
             Expanded(
-              child: savedFiles.isEmpty
+              child: notes.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -760,22 +960,20 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
                     )
                   : ListView.builder(
                       padding: EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: savedFiles.length,
+                      itemCount: notes.length,
                       itemBuilder: (context, index) {
-                        final filename = savedFiles[index];
-                        final category = categories[filename];
-                        final timestamp = timestamps[filename];
-                        final isTranscribing = transcribing[filename] == true;
+                        final note = notes[index];
+                        final isTranscribing = transcribing[note.filename] == true;
                         
                         return Card(
                           margin: EdgeInsets.only(bottom: 12),
                           elevation: 2,
                           child: ListTile(
-                            leading: category != null
-                                ? _getCategoryIcon(category)
+                            leading: note.category != null
+                                ? _getCategoryIcon(note.category!)
                                 : Icon(Icons.audiotrack, color: Colors.grey),
                             title: Text(
-                              getPreview(filename),
+                              getPreview(note),
                               style: TextStyle(
                                 fontWeight: FontWeight.w500,
                                 fontStyle: isTranscribing ? FontStyle.italic : FontStyle.normal,
@@ -786,13 +984,12 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (timestamp != null)
-                                  Text(formatDateTime(timestamp)),
-                                if (category != null)
+                                Text(formatDateTime(note.timestamp)),
+                                if (note.category != null)
                                   Padding(
                                     padding: EdgeInsets.only(top: 4),
                                     child: Text(
-                                      category,
+                                      note.category!,
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: Colors.blue,
@@ -809,7 +1006,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
                                     child: CircularProgressIndicator(strokeWidth: 2),
                                   )
                                 : Icon(Icons.more_vert),
-                            onTap: () => showThoughtOptions(filename),
+                            onTap: () => showThoughtOptions(note),
                           ),
                         );
                       },
@@ -822,7 +1019,6 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
   }
 }
 
-// CATEGORY BUTTON WIDGET
 class _CategoryButton extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -843,7 +1039,7 @@ class _CategoryButton extends StatelessWidget {
       style: ElevatedButton.styleFrom(
         backgroundColor: Colors.white,
         foregroundColor: color,
-        padding: EdgeInsets.symmetric(vertical: 12),
+        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(color: color.withOpacity(0.3)),
