@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:ramble/screens/thoughts_page.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
 import 'thoughts_page.dart';
+import '../services/bluetooth_service.dart';
 
 class HomePage extends StatefulWidget {
   @override
@@ -9,7 +10,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  
+  final BluetoothService _bluetoothService = BluetoothService();
+  bool _isSyncing = false;
   // Mock data for recent thoughts
   List<Map<String, String>> recentThoughts = [
     {
@@ -25,22 +27,64 @@ class _HomePageState extends State<HomePage> {
   ];
 
   void _syncAudio() async {
-    // Show syncing message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Syncing audio files...'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-    
-    // Navigate to thoughts page which will handle the transcription
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => ThoughtsPage(autoTranscribe: true)),
-    );
-    
-    // Refresh recent thoughts when returning
-    setState(() {});
+    setState(() {
+      _isSyncing = true;
+    });
+
+    // Setup status callbacks
+    _bluetoothService.onStatusUpdate = (status) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(status), duration: Duration(seconds: 2)),
+      );
+    };
+
+    _bluetoothService.onSyncComplete = () {
+      setState(() {
+        _isSyncing = false;
+      });
+
+      // Navigate to thoughts page with auto-transcribe
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => ThoughtsPage(autoTranscribe: true)),
+      );
+    };
+
+    // Find device
+    fbp.BluetoothDevice? device = await _bluetoothService.findRambleDevice();
+
+    if (!mounted) return;
+
+    if (device == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ramble Device not found. Make sure it is paired.')),
+      );
+      setState(() {
+        _isSyncing = false;
+      });
+      return;
+    }
+
+    // Connect
+    bool connected = await _bluetoothService.connect(device);
+
+    if (!mounted) return;
+
+    if (!connected) {
+      setState(() {
+        _isSyncing = false;
+      });
+      return;
+    }
+
+    // Sync files
+    await _bluetoothService.syncFiles();
+
+    // Optional: Delete files from ESP32 after successful sync
+    // await _bluetoothService.deleteFilesOnDevice();
+
+    // Disconnect
+    await _bluetoothService.disconnect();
   }
 
   @override
@@ -192,7 +236,7 @@ class _HomePageState extends State<HomePage> {
                   
                   // BIG SYNC BUTTON
                   GestureDetector(
-                    onTap: _syncAudio,
+                    onTap: _isSyncing ? null : _syncAudio,
                     child: Container(
                       width: 180,
                       height: 180,
@@ -205,7 +249,7 @@ class _HomePageState extends State<HomePage> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.blue.shade200,
+                            color: _isSyncing ? Colors.grey.shade200 : Colors.blue.shade200,
                             blurRadius: 20,
                             spreadRadius: 5,
                           ),
@@ -214,14 +258,13 @@ class _HomePageState extends State<HomePage> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(
-                            Icons.sync,
-                            size: 64,
-                            color: Colors.white,
-                          ),
+                          _isSyncing
+                            ? CircularProgressIndicator(color: Colors.white)
+                            : Icon(Icons.sync, size:64, color: Colors.white),
+                          
                           SizedBox(height: 8),
                           Text(
-                            'SYNC',
+                            _isSyncing ? 'Syncing...' : 'Sync Audio',
                             style: TextStyle(
                               color: Colors.white,
                               fontSize: 20,

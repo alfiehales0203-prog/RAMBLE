@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'screens/home_page.dart';
+import 'Screens/home_page.dart';
 import 'models/audio_note.dart';
 import 'models/user_category.dart';
 
