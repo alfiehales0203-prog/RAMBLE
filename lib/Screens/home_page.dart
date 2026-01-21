@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
+import 'dart:async';
 import 'thoughts_page.dart';
 import '../services/bluetooth_service.dart';
 
@@ -38,7 +39,16 @@ class _HomePageState extends State<HomePage> {
       );
     };
 
+    // Completer to wait for sync to complete
+    final syncCompleter = Completer<void>();
+
     _bluetoothService.onSyncComplete = () {
+      print('HOME: Sync complete callback received!');
+      // Complete the completer so we stop waiting
+      if (!syncCompleter.isCompleted) {
+        syncCompleter.complete();
+      }
+
       setState(() {
         _isSyncing = false;
       });
@@ -77,13 +87,31 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    // Sync files
-    await _bluetoothService.syncFiles();
+    // Sync files - this just sends the SYNC command
+   // await _bluetoothService.syncFiles();
+
+    // IMPORTANT: Wait for sync to complete before disconnecting!
+    // The ESP32 will send SYNC_COMPLETE when done, which triggers onSyncComplete
+    print('HOME: Waiting for sync to complete...');
+
+    // Wait for sync with a timeout (e.g., 5 minutes for large transfers)
+    try {
+      await syncCompleter.future.timeout(Duration(minutes: 5));
+      print('HOME: Sync completed successfully!');
+    } catch (e) {
+      print('HOME: Sync timeout or error: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Sync timed out')),
+      );
+      setState(() {
+        _isSyncing = false;
+      });
+    }
 
     // Optional: Delete files from ESP32 after successful sync
     // await _bluetoothService.deleteFilesOnDevice();
 
-    // Disconnect
+    // Disconnect after sync is done
     await _bluetoothService.disconnect();
   }
 

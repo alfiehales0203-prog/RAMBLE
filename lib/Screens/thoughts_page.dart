@@ -700,7 +700,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
                   showFullTranscription(note);
                 },
               ),
-            
+
             ListTile(
               leading: Icon(Icons.play_arrow, color: Colors.green),
               title: Text('Play Audio'),
@@ -709,7 +709,17 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
                 playAudio(note);
               },
             ),
-            
+
+            if (!note.isTranscribed && transcribing[note.filename] != true)
+              ListTile(
+                leading: Icon(Icons.record_voice_over, color: Colors.orange),
+                title: Text('Transcribe'),
+                onTap: () {
+                  Navigator.pop(context);
+                  transcribeAudio(note);
+                },
+              ),
+
             Divider(),
             
             Text(
