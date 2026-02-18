@@ -4,4 +4,19 @@
    <FileRef
       location = "self:">
    </FileRef>
+   <FileRef
+      location = "group:TRANSCRIPTION_FIX.md">
+   </FileRef>
+   <FileRef
+      location = "group:CATEGORY_ASSIGNMENT_COMPLETE.md">
+   </FileRef>
+   <FileRef
+      location = "group:CATEGORY_FILTER_IMPROVEMENTS.md">
+   </FileRef>
+   <FileRef
+      location = "group:REGRESSION_FIX.md">
+   </FileRef>
+   <FileRef
+      location = "group:CATEGORY_BADGE_FIX.md">
+   </FileRef>
 </Workspace>

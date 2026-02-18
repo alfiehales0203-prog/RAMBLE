@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		212344462F3B5F8C00DA5535 /* RAMBLE Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 212344452F3B5F8C00DA5535 /* RAMBLE Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		21C758832F3C93E5008971F7 /* ENABLE_TRANSCRIPTION.md in Resources */ = {isa = PBXBuildFile; fileRef = 21C758822F3C93E5008971F7 /* ENABLE_TRANSCRIPTION.md */; };
+		21C758852F3C93FC008971F7 /* QUICK_TRANSCRIPTION_SETUP.md in Resources */ = {isa = PBXBuildFile; fileRef = 21C758842F3C93FC008971F7 /* QUICK_TRANSCRIPTION_SETUP.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,16 +39,58 @@
 /* Begin PBXFileReference section */
 		212344382F3B5F8B00DA5535 /* RAMBLE.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RAMBLE.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		212344452F3B5F8C00DA5535 /* RAMBLE Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "RAMBLE Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		21C758822F3C93E5008971F7 /* ENABLE_TRANSCRIPTION.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ENABLE_TRANSCRIPTION.md; sourceTree = "<group>"; };
+		21C758842F3C93FC008971F7 /* QUICK_TRANSCRIPTION_SETUP.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = QUICK_TRANSCRIPTION_SETUP.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2123449E2F3B634900DA5535 /* Exceptions for "RAMBLE" folder in "RAMBLE" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				WatchConnectivitySender.swift,
+			);
+			target = 212344372F3B5F8B00DA5535 /* RAMBLE */;
+		};
+		2123449F2F3B634900DA5535 /* Exceptions for "RAMBLE" folder in "RAMBLE Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				WatchConnectivitySender.swift,
+			);
+			target = 212344442F3B5F8C00DA5535 /* RAMBLE Watch App */;
+		};
+		212344A12F3B660700DA5535 /* Exceptions for "RAMBLE Watch App" folder in "RAMBLE" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Managers/PermissionsManager.swift,
+			);
+			target = 212344372F3B5F8B00DA5535 /* RAMBLE */;
+		};
+		212344A22F3B660700DA5535 /* Exceptions for "RAMBLE Watch App" folder in "RAMBLE Watch App" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Managers/PermissionsManager.swift,
+			);
+			target = 212344442F3B5F8C00DA5535 /* RAMBLE Watch App */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2123443A2F3B5F8B00DA5535 /* RAMBLE */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2123449E2F3B634900DA5535 /* Exceptions for "RAMBLE" folder in "RAMBLE" target */,
+				2123449F2F3B634900DA5535 /* Exceptions for "RAMBLE" folder in "RAMBLE Watch App" target */,
+			);
 			path = RAMBLE;
 			sourceTree = "<group>";
 		};
 		212344492F3B5F8C00DA5535 /* RAMBLE Watch App */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				212344A12F3B660700DA5535 /* Exceptions for "RAMBLE Watch App" folder in "RAMBLE" target */,
+				212344A22F3B660700DA5535 /* Exceptions for "RAMBLE Watch App" folder in "RAMBLE Watch App" target */,
+			);
 			path = "RAMBLE Watch App";
 			sourceTree = "<group>";
 		};
@@ -76,6 +120,8 @@
 				2123443A2F3B5F8B00DA5535 /* RAMBLE */,
 				212344492F3B5F8C00DA5535 /* RAMBLE Watch App */,
 				212344392F3B5F8B00DA5535 /* Products */,
+				21C758822F3C93E5008971F7 /* ENABLE_TRANSCRIPTION.md */,
+				21C758842F3C93FC008971F7 /* QUICK_TRANSCRIPTION_SETUP.md */,
 			);
 			sourceTree = "<group>";
 		};
@@ -180,6 +226,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				21C758832F3C93E5008971F7 /* ENABLE_TRANSCRIPTION.md in Resources */,
+				21C758852F3C93FC008971F7 /* QUICK_TRANSCRIPTION_SETUP.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -345,14 +393,16 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = RAMBLE;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ramble needs access to your microphone to record voice notes.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ramble needs access to speech recognition to transcribe your voice recordings into text.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = RAMBLE.RAMBLE;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.Alfie.Ramble;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = RAMBLE.RAMBLE.watchkitapp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Alfie.Ramble.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -378,14 +428,16 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = RAMBLE;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Ramble needs access to your microphone to record voice notes.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ramble needs access to speech recognition to transcribe your voice recordings into text.";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = RAMBLE.RAMBLE;
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.Alfie.Ramble;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = RAMBLE.RAMBLE.watchkitapp;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Alfie.Ramble.watchkitapp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -411,7 +463,9 @@
 				DEVELOPMENT_TEAM = H6R7B78TFJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RAMBLE/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = RAMBLE;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ramble needs access to speech recognition to transcribe your voice recordings into text.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -423,7 +477,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = RAMBLE.RAMBLE;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Alfie.Ramble;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -446,7 +500,9 @@
 				DEVELOPMENT_TEAM = H6R7B78TFJ;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RAMBLE/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = RAMBLE;
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Ramble needs access to speech recognition to transcribe your voice recordings into text.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -458,7 +514,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = RAMBLE.RAMBLE;
+				PRODUCT_BUNDLE_IDENTIFIER = com.Alfie.Ramble;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;

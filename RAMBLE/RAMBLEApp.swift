@@ -11,7 +11,8 @@ import SwiftUI
 struct RAMBLEApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            IndexView()
+                .environmentObject(WatchConnectivityManager.shared)
         }
     }
 }
